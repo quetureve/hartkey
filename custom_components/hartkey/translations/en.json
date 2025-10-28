@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "bearer_token": "Bearer Token"
+        },
+        "description": "Bearer key can be obtained on the page https://key.rt.ru/main/devices in developer tools (F12) in request headers on the 'Network' tab",
+        "title": "Hartkey Configuration"
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect, check your internet connection",
+      "invalid_auth": "Invalid bearer token",
+      "unknown": "An unknown error occurred"
+    },
+    "abort": {
+      "already_configured": "Integration for this bearer token is already configured"
+    }
+  }
+}

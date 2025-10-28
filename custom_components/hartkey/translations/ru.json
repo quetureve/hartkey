@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "bearer_token": "Bearer Token",
+          "update_interval": "Интервал обновления (минуты)"
+        },
+        "description": "Bearer token можно получить на странице https://key.rt.ru/main/devices в инструментах разработчика (F12) в заголовках запросов на вкладке 'Сеть'",
+        "title": "Настройка Hartkey"
+      }
+    },
+    "error": {
+      "cannot_connect": "Не удалось подключиться, проверьте интернет-соединение",
+      "invalid_auth": "Неверный bearer token",
+      "unknown": "Произошла неизвестная ошибка"
+    },
+    "abort": {
+      "already_configured": "Интеграция для этого bearer token уже настроена"
+    }
+  }
+}

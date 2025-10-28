@@ -1,0 +1,11 @@
+refresh_data:
+  name: Refresh data
+  description: Force refresh all Hartkey data
+  fields:
+    entity_id:
+      name: Entity
+      description: Specific entity to refresh (optional)
+      selector:
+        entity:
+          domain: sensor
+          integration: hartkey

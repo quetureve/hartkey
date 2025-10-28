@@ -1,0 +1,7 @@
+{
+  "name": "Hartkey",
+  "render_readme": true,
+  "domains": ["hartkey"],
+  "homeassistant": "2025.10.0",
+  "zip_release": false
+}
