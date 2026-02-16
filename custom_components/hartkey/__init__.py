@@ -24,7 +24,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = HartkeyDataUpdateCoordinator(
         hass, 
         bearer_token=entry.data["bearer_token"],
-        update_interval=update_interval
+        update_interval=update_interval,
+        config_entry_id=entry.entry_id  # передаём ID записи для reauth
     )
     
     await coordinator.async_config_entry_first_refresh()

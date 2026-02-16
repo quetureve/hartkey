@@ -146,6 +146,12 @@ class HartkeyOpenButton(CoordinatorEntity, ButtonEntity):
                                 self._attr_name
                             )
                             await self.coordinator.async_request_refresh()
+                        elif response.status == 401:
+                            _LOGGER.error("Authentication failed for %s", self._attr_name)
+                            # Инициируем процесс повторной аутентификации
+                            self.hass.async_create_task(
+                                self.hass.config_entries.async_reauth(self.coordinator.config_entry_id)
+                            )
                         else:
                             text = await response.text()
                             _LOGGER.error(

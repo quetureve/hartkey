@@ -12,6 +12,7 @@ import async_timeout
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
+from homeassistant.config_entries import ConfigEntryAuthFailed
 
 from .const import API_URL_DEVICES, API_URL_EVENTS, EVENT_TYPES, DEVICE_TYPE_INTERCOM, DEVICE_TYPE_GATE, DEFAULT_UPDATE_INTERVAL
 
@@ -21,7 +22,9 @@ _LOGGER = logging.getLogger(__name__)
 class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Hartkey data."""
 
-    def __init__(self, hass: HomeAssistant, bearer_token: str, update_interval: int = DEFAULT_UPDATE_INTERVAL) -> None:
+    def __init__(self, hass: HomeAssistant, bearer_token: str,
+                 config_entry_id: str,
+                 update_interval: int = DEFAULT_UPDATE_INTERVAL) -> None:
         """Initialize coordinator."""
         super().__init__(
             hass,
@@ -30,6 +33,7 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(minutes=update_interval),
         )
         self.bearer_token = bearer_token
+        self.config_entry_id = config_entry_id
         self.devices = []
         self._update_interval = update_interval
         self._last_successful_data = None
@@ -56,6 +60,9 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
                 
             return result
                 
+        except ConfigEntryAuthFailed as err:
+            # Не возвращаем старые данные, пробрасываем исключение для запуска reauth
+            raise
         except aiohttp.ClientError as err:
             _LOGGER.warning("Network error during update: %s", err)
             if self._last_successful_data:
@@ -85,7 +92,7 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug("Successfully fetched devices data")
                         return self._parse_devices(data)
                     elif response.status == 401:
-                        raise UpdateFailed("Invalid authentication")
+                        raise ConfigEntryAuthFailed("Invalid authentication")
                     else:
                         text = await response.text()
                         _LOGGER.error("API error response: %s", text)
@@ -133,6 +140,8 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
                             parsed_events = self._parse_events(data)
                             _LOGGER.debug("Parsed events for %d devices", len(parsed_events))
                             return parsed_events
+                        elif response.status == 401:
+                            raise ConfigEntryAuthFailed("Invalid authentication")
                         elif response.status == 400:
                             error_data = await response.json()
                             _LOGGER.warning("API validation error for events: %s", error_data)
@@ -144,6 +153,8 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
         except asyncio.TimeoutError:
             _LOGGER.warning("Timeout fetching events")
             return {}
+        except ConfigEntryAuthFailed:
+            raise
         except Exception as err:
             _LOGGER.warning("Error fetching events: %s", err)
             return {}
