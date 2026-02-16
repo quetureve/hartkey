@@ -3,7 +3,6 @@
 [![hacs_badge][hacs-shield]][hacs]
 [![GitHub Release][releases-shield]][releases]
 [![GitHub all releases][downloads-shield]][downloads]
-[![Donate](https://img.shields.io/badge/donate-Tinkoff-FFDD2D.svg)](https://www.tinkoff.ru/rm/r_XcxxSexrTl.GlEflRXPzn/NA5GF67360)
 
 Интеграция для управления умными домофонами Ростелеком через сервис [key.rt.ru](https://key.rt.ru) из Home Assistant.
 
