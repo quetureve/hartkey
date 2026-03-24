@@ -8,6 +8,13 @@
         },
         "description": "Bearer token можно получить на странице https://key.rt.ru/main/devices в инструментах разработчика (F12) в заголовках запросов на вкладке 'Сеть'",
         "title": "Настройка Hartkey"
+      },
+      "init": {
+        "data": {
+          "bearer_token": "Bearer Token",
+          "update_interval": "Интервал обновления (минуты)"
+        },
+        "title": "Настройки Hartkey"
       }
     },
     "error": {

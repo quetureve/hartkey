@@ -3,10 +3,18 @@
     "step": {
       "user": {
         "data": {
-          "bearer_token": "Bearer Token"
+          "bearer_token": "Bearer Token",
+          "update_interval": "Update interval (minutes)"
         },
-        "description": "Bearer key can be obtained on the page https://key.rt.ru/main/devices in developer tools (F12) in request headers on the 'Network' tab",
+        "description": "Bearer token can be obtained on the page https://key.rt.ru/main/devices in developer tools (F12) in request headers on the 'Network' tab",
         "title": "Hartkey Configuration"
+      },
+      "init": {
+        "data": {
+          "bearer_token": "Bearer Token",
+          "update_interval": "Update interval (minutes)"
+        },
+        "title": "Hartkey Options"
       }
     },
     "error": {
