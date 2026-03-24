@@ -5,6 +5,9 @@ API_URL_DEVICES = "https://household.key.rt.ru/api/v2/app/devices/intercom"
 API_URL_OPEN = "https://household.key.rt.ru/api/v2/app/devices/{intercom_id}/open"
 API_URL_EVENTS = "https://events.key.rt.ru/api/v2/events/list"
 
+# New camera API
+API_URL_CAMERAS = "https://vc.key.rt.ru/api/v1/cameras"
+
 CONF_BEARER_TOKEN = "bearer_token"
 CONF_UPDATE_INTERVAL = "update_interval"
 
@@ -42,3 +45,7 @@ EVENT_TYPE_NAMES = {
     "rfid_open_local": "Открытие по RFID",
     "dtmf_open_local": "Открытие по DTMF"
 }
+
+# Camera settings
+TOKEN_REFRESH_BUFFER = 300   # seconds before expiration to refresh
+CAMERAS_CACHE_TTL = 120      # seconds to cache camera list

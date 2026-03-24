@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+import json
+import base64
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 import async_timeout
@@ -14,7 +18,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 from homeassistant.config_entries import ConfigEntryAuthFailed
 
-from .const import API_URL_DEVICES, API_URL_EVENTS, EVENT_TYPES, DEVICE_TYPE_INTERCOM, DEVICE_TYPE_GATE, DEFAULT_UPDATE_INTERVAL
+from .const import (
+    API_URL_DEVICES, API_URL_EVENTS, API_URL_CAMERAS,
+    EVENT_TYPES, DEVICE_TYPE_INTERCOM, DEVICE_TYPE_GATE,
+    DEFAULT_UPDATE_INTERVAL, TOKEN_REFRESH_BUFFER, CAMERAS_CACHE_TTL
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +45,15 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
         self.devices = []
         self._update_interval = update_interval
         self._last_successful_data = None
+
+        # Camera caching
+        self._cached_cameras_info = None
+        self._cameras_last_update = None
+        self._cameras_lock = asyncio.Lock()
+
+        # Mapping from camera_id to device_id and device_name
+        self.camera_to_device_id = {}
+        self.camera_to_device_name = {}
 
     async def _async_update_data(self):
         """Fetch data from API."""
@@ -83,14 +100,24 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Unexpected error: {err}") from err
 
     async def _fetch_devices(self, headers):
-        """Fetch devices from API."""
+        """Fetch devices from API and update camera mapping."""
         async with async_timeout.timeout(10):
             async with aiohttp.ClientSession() as session:
                 async with session.get(API_URL_DEVICES, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
                         _LOGGER.debug("Successfully fetched devices data")
-                        return self._parse_devices(data)
+                        devices = self._parse_devices(data)
+                        # Update mapping from camera_id to device_id and device_name
+                        for device in devices:
+                            camera_id = device.get("camera_id")
+                            device_id = device.get("id")
+                            if camera_id and device_id:
+                                self.camera_to_device_id[camera_id] = str(device_id)
+                                # Use description or name_by_user as device name
+                                device_name = device.get("description") or device.get("name_by_user") or device.get("name_by_company") or f"Device {device_id}"
+                                self.camera_to_device_name[camera_id] = device_name
+                        return devices
                     elif response.status == 401:
                         raise ConfigEntryAuthFailed("Invalid authentication")
                     else:
@@ -213,3 +240,144 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Error parsing events: %s", err)
             
         return events_by_device
+
+    # --- Camera methods -------------------------------------------------
+
+    def _decode_jwt_payload(self, token: str) -> dict:
+        """Decode JWT payload without signature verification."""
+        try:
+            parts = token.split('.')
+            if len(parts) != 3:
+                return {}
+            payload = parts[1]
+            # Add padding if needed
+            payload += '=' * (4 - len(payload) % 4)
+            decoded = base64.urlsafe_b64decode(payload)
+            return json.loads(decoded)
+        except Exception as err:
+            _LOGGER.debug("Failed to decode JWT: %s", err)
+            return {}
+
+    async def _fetch_cameras(self) -> list[dict]:
+        """Fetch cameras from API."""
+        headers = {"Authorization": f"Bearer {self.bearer_token}"}
+        params = {"limit": 100, "offset": 0}
+        async with async_timeout.timeout(15):
+            async with aiohttp.ClientSession() as session:
+                async with session.get(API_URL_CAMERAS, headers=headers, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        _LOGGER.debug("Cameras API response type: %s", type(data))
+
+                        cameras = []
+                        if isinstance(data, dict):
+                            # Expected format: { "data": { "items": [...] } }
+                            inner = data.get("data")
+                            if isinstance(inner, dict):
+                                items = inner.get("items")
+                                if isinstance(items, list):
+                                    cameras = items
+                                else:
+                                    _LOGGER.warning("No 'items' list in response data")
+                            elif isinstance(inner, list):
+                                cameras = inner
+                            else:
+                                # Maybe direct items in top-level data
+                                items = data.get("items")
+                                if isinstance(items, list):
+                                    cameras = items
+                        elif isinstance(data, list):
+                            cameras = data
+                        else:
+                            _LOGGER.error("Unexpected cameras API response format: %s", type(data))
+                            cameras = []
+
+                        _LOGGER.debug("Found %d cameras", len(cameras))
+
+                        for cam in cameras:
+                            if not isinstance(cam, dict):
+                                _LOGGER.warning("Skipping non-dict camera entry: %s", cam)
+                                continue
+                            streamer_token = cam.get("streamer_token")
+                            if streamer_token:
+                                payload = self._decode_jwt_payload(streamer_token)
+                                cam["streamer_token_exp"] = payload.get("exp")
+                            screenshot_token = cam.get("screenshot_token")
+                            if screenshot_token:
+                                payload = self._decode_jwt_payload(screenshot_token)
+                                cam["screenshot_token_exp"] = payload.get("exp")
+                        return cameras
+                    elif response.status == 401:
+                        raise ConfigEntryAuthFailed("Invalid authentication")
+                    else:
+                        text = await response.text()
+                        raise UpdateFailed(f"Error fetching cameras: {response.status} - {text}")
+
+    async def get_cameras_info(self) -> list[dict]:
+        """Get cached camera info, refresh if stale."""
+        async with self._cameras_lock:
+            now = time.time()
+            if (self._cached_cameras_info is not None and
+                self._cameras_last_update is not None and
+                (now - self._cameras_last_update) < CAMERAS_CACHE_TTL):
+                return self._cached_cameras_info
+
+            try:
+                self._cached_cameras_info = await self._fetch_cameras()
+                self._cameras_last_update = now
+            except Exception as err:
+                _LOGGER.error("Error fetching cameras: %s", err)
+                if self._cached_cameras_info is None:
+                    self._cached_cameras_info = []
+                    self._cameras_last_update = now
+                # Otherwise keep old cached info
+
+            return self._cached_cameras_info
+
+    def clear_cached_cameras_info(self):
+        """Force refresh of camera info on next request."""
+        self._cached_cameras_info = None
+        self._cameras_last_update = None
+
+    async def get_camera_stream_url(self, camera_id: str) -> str | None:
+        """Generate streaming URL for a camera."""
+        cameras = await self.get_cameras_info()
+        for cam in cameras:
+            if cam.get("id") == camera_id:
+                streamer_token = cam.get("streamer_token")
+                streamer_url = cam.get("streamer_url")
+                if not streamer_token or not streamer_url:
+                    return None
+
+                # Check token expiration
+                exp = cam.get("streamer_token_exp")
+                if exp and (exp - time.time()) < TOKEN_REFRESH_BUFFER:
+                    # Token expires soon – refresh cache
+                    self.clear_cached_cameras_info()
+                    cameras = await self.get_cameras_info()
+                    for cam2 in cameras:
+                        if cam2.get("id") == camera_id:
+                            streamer_token = cam2.get("streamer_token")
+                            streamer_url = cam2.get("streamer_url")
+                            break
+                    if not streamer_token:
+                        return None
+
+                # Build URL
+                parsed = urlparse(streamer_url)
+                netloc = parsed.netloc
+                url = (
+                    f"https://{netloc}/stream/{camera_id}/live.mp4"
+                    "?mp4-fragment-length=0.5&mp4-use-speed=0&mp4-afiller=1"
+                    f"&token={streamer_token}"
+                )
+                return url
+        return None
+
+    def get_device_id_for_camera(self, camera_id: str) -> str | None:
+        """Return device ID associated with given camera ID."""
+        return self.camera_to_device_id.get(camera_id)
+
+    def get_device_name_for_camera(self, camera_id: str) -> str | None:
+        """Return device name associated with given camera ID."""
+        return self.camera_to_device_name.get(camera_id)

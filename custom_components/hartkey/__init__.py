@@ -11,7 +11,7 @@ from .coordinator import HartkeyDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BUTTON, Platform.SENSOR, Platform.CAMERA]   # <-- добавлен Camera
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Hartkey from a config entry."""
@@ -25,7 +25,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, 
         bearer_token=entry.data["bearer_token"],
         update_interval=update_interval,
-        config_entry_id=entry.entry_id  # передаём ID записи для reauth
+        config_entry_id=entry.entry_id
     )
     
     await coordinator.async_config_entry_first_refresh()
