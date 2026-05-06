@@ -58,27 +58,17 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API."""
         headers = {"Authorization": f"Bearer {self.bearer_token}"}
-        
         _LOGGER.debug("Starting data update for Hartkey")
-        
         try:
             devices = await self._fetch_devices(headers)
             self.devices = devices
             events = await self._fetch_events(headers, devices)
-            
-            result = {
-                "devices": devices,
-                "events": events
-            }
-            
+            result = {"devices": devices, "events": events}
             self._last_successful_data = result
-            _LOGGER.debug("Coordinator update completed. Devices: %d, Events for devices: %d", 
+            _LOGGER.debug("Coordinator update completed. Devices: %d, Events for devices: %d",
                          len(devices), len(events))
-                
             return result
-                
-        except ConfigEntryAuthFailed as err:
-            # Не возвращаем старые данные, пробрасываем исключение для запуска reauth
+        except ConfigEntryAuthFailed:
             raise
         except aiohttp.ClientError as err:
             _LOGGER.warning("Network error during update: %s", err)
@@ -114,7 +104,6 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
                             device_id = device.get("id")
                             if camera_id and device_id:
                                 self.camera_to_device_id[camera_id] = str(device_id)
-                                # Use description or name_by_user as device name
                                 device_name = device.get("description") or device.get("name_by_user") or device.get("name_by_company") or f"Device {device_id}"
                                 self.camera_to_device_name[camera_id] = device_name
                         return devices
@@ -130,22 +119,22 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
         if not devices:
             _LOGGER.debug("No devices to fetch events for")
             return {}
-            
+
         device_ids = []
         for device in devices:
             device_id = device.get('id')
             if device_id and device.get('device_type') in [DEVICE_TYPE_INTERCOM, DEVICE_TYPE_GATE]:
                 device_ids.append(str(device_id))
-                
+
         if not device_ids:
             _LOGGER.debug("No valid device IDs found for events")
             return {}
-            
+
         _LOGGER.debug("Fetching events for %d device IDs", len(device_ids))
-        
+
         end_time = dt_util.utcnow()
         start_time = end_time - timedelta(days=7)
-        
+
         params = {
             "begin_raised_at": start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end_raised_at": end_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -156,7 +145,7 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
             "offset": 0,
             "limit": 100
         }
-        
+
         try:
             async with async_timeout.timeout(15):
                 async with aiohttp.ClientSession() as session:
@@ -190,19 +179,19 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
         """Parse devices from API response."""
         if not isinstance(data, dict):
             raise UpdateFailed(f"Expected dictionary response, got {type(data)}")
-        
+
         devices = []
-        
+
         if "data" in data and isinstance(data["data"], dict):
             data_content = data["data"]
             if "devices" in data_content and isinstance(data_content["devices"], list):
                 devices = data_content["devices"]
-        
+
         valid_devices = [
-            device for device in devices 
+            device for device in devices
             if isinstance(device, dict) and device.get('device_type') in [DEVICE_TYPE_INTERCOM, DEVICE_TYPE_GATE]
         ]
-        
+
         _LOGGER.info("Found %d valid devices (intercom/gate)", len(valid_devices))
         return valid_devices
 
@@ -211,18 +200,18 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
         if not isinstance(data, dict):
             _LOGGER.warning("Expected dictionary for events, got %s", type(data))
             return {}
-            
+
         events_by_device = {}
-        
+
         try:
             events_list = []
-            
+
             if "data" in data and isinstance(data["data"], dict):
                 if "items" in data["data"] and isinstance(data["data"]["items"], list):
                     events_list = data["data"]["items"]
-            
+
             _LOGGER.debug("Total events found in response: %d", len(events_list))
-            
+
             event_count = 0
             for event in events_list:
                 if isinstance(event, dict):
@@ -233,12 +222,12 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
                             events_by_device[device_id_str] = []
                         events_by_device[device_id_str].append(event)
                         event_count += 1
-                        
+
             _LOGGER.debug("Successfully parsed %d events for %d devices", event_count, len(events_by_device))
-                        
+
         except Exception as err:
             _LOGGER.error("Error parsing events: %s", err)
-            
+
         return events_by_device
 
     # --- Camera methods -------------------------------------------------
@@ -259,7 +248,7 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
             return {}
 
     async def _fetch_cameras(self) -> list[dict]:
-        """Fetch cameras from API."""
+        """Fetch cameras from API, extract tokens."""
         headers = {"Authorization": f"Bearer {self.bearer_token}"}
         params = {"limit": 100, "offset": 0}
         async with async_timeout.timeout(15):
@@ -271,41 +260,27 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
 
                         cameras = []
                         if isinstance(data, dict):
-                            # Expected format: { "data": { "items": [...] } }
                             inner = data.get("data")
                             if isinstance(inner, dict):
-                                items = inner.get("items")
-                                if isinstance(items, list):
-                                    cameras = items
-                                else:
-                                    _LOGGER.warning("No 'items' list in response data")
+                                items = inner.get("items", [])
                             elif isinstance(inner, list):
-                                cameras = inner
+                                items = inner
                             else:
-                                # Maybe direct items in top-level data
-                                items = data.get("items")
-                                if isinstance(items, list):
-                                    cameras = items
+                                items = data.get("items", [])
                         elif isinstance(data, list):
-                            cameras = data
+                            items = data
                         else:
-                            _LOGGER.error("Unexpected cameras API response format: %s", type(data))
-                            cameras = []
+                            items = []
 
-                        _LOGGER.debug("Found %d cameras", len(cameras))
-
-                        for cam in cameras:
+                        for cam in items:
                             if not isinstance(cam, dict):
-                                _LOGGER.warning("Skipping non-dict camera entry: %s", cam)
                                 continue
                             streamer_token = cam.get("streamer_token")
                             if streamer_token:
                                 payload = self._decode_jwt_payload(streamer_token)
                                 cam["streamer_token_exp"] = payload.get("exp")
-                            screenshot_token = cam.get("screenshot_token")
-                            if screenshot_token:
-                                payload = self._decode_jwt_payload(screenshot_token)
-                                cam["screenshot_token_exp"] = payload.get("exp")
+                            # Screenshot токен больше не нужен, но сохраняем без обработки
+                            cameras.append(cam)
                         return cameras
                     elif response.status == 401:
                         raise ConfigEntryAuthFailed("Invalid authentication")
@@ -330,7 +305,6 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
                 if self._cached_cameras_info is None:
                     self._cached_cameras_info = []
                     self._cameras_last_update = now
-                # Otherwise keep old cached info
 
             return self._cached_cameras_info
 
@@ -340,7 +314,7 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
         self._cameras_last_update = None
 
     async def get_camera_stream_url(self, camera_id: str) -> str | None:
-        """Generate streaming URL for a camera."""
+        """Generate streaming URL for a camera with buffering params."""
         cameras = await self.get_cameras_info()
         for cam in cameras:
             if cam.get("id") == camera_id:
@@ -349,10 +323,9 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
                 if not streamer_token or not streamer_url:
                     return None
 
-                # Check token expiration
+                # Проверка срока действия токена
                 exp = cam.get("streamer_token_exp")
                 if exp and (exp - time.time()) < TOKEN_REFRESH_BUFFER:
-                    # Token expires soon – refresh cache
                     self.clear_cached_cameras_info()
                     cameras = await self.get_cameras_info()
                     for cam2 in cameras:
@@ -363,12 +336,12 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
                     if not streamer_token:
                         return None
 
-                # Build URL
                 parsed = urlparse(streamer_url)
                 netloc = parsed.netloc
+                # Добавляем параметры для плавного HLS
                 url = (
                     f"https://{netloc}/stream/{camera_id}/live.mp4"
-                    "?mp4-fragment-length=0.5&mp4-use-speed=0&mp4-afiller=1"
+                    "?mp4-fragment-length=1&mp4-use-speed=1&mp4-afiller=1"
                     f"&token={streamer_token}"
                 )
                 return url
