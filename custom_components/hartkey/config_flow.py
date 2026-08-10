@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import DOMAIN, API_URL_DEVICES, DEFAULT_UPDATE_INTERVAL, CONF_UPDATE_INTERVAL, CONF_BEARER_TOKEN
+from .const import DOMAIN, API_URL_DEVICES_INTERCOM, DEFAULT_UPDATE_INTERVAL, CONF_UPDATE_INTERVAL, CONF_BEARER_TOKEN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ async def validate_auth(hass: HomeAssistant, bearer_token: str) -> bool:
     
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(API_URL_DEVICES, headers=headers) as response:
+            async with session.get(API_URL_DEVICES_INTERCOM, headers=headers) as response:
                 if response.status == 200:
                     return True
                 elif response.status == 401:

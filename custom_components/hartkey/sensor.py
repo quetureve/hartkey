@@ -75,8 +75,9 @@ class HartkeyEventSensor(CoordinatorEntity, SensorEntity):
             _LOGGER.error("Device ID is missing for device: %s", device)
             return
 
-        device_name = device.get('description') or device.get('name_by_user') or device.get('name_by_company') or f'Домофон {self.device_id}'
-        
+        fallback_label = "Ворота" if self.device_type == DEVICE_TYPE_GATE else "Домофон"
+        device_name = device.get('description') or device.get('name_by_user') or device.get('name_by_company') or f'{fallback_label} {self.device_id}'
+
         if self.device_type == DEVICE_TYPE_GATE:
             self._attr_name = f"{device_name} - Открытие ворот"
         else:

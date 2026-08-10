@@ -1,7 +1,8 @@
 """Constants for Hartkey integration."""
 
 DOMAIN = "hartkey"
-API_URL_DEVICES = "https://household.key.rt.ru/api/v2/app/devices/intercom"
+API_URL_DEVICES_INTERCOM = "https://household.key.rt.ru/api/v2/app/devices/intercom"
+API_URL_DEVICES_BARRIER = "https://household.key.rt.ru/api/v2/app/devices/barrier"
 API_URL_OPEN = "https://household.key.rt.ru/api/v2/app/devices/{intercom_id}/open"
 API_URL_EVENTS = "https://events.key.rt.ru/api/v2/events/list"
 

@@ -19,7 +19,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.config_entries import ConfigEntryAuthFailed
 
 from .const import (
-    API_URL_DEVICES, API_URL_EVENTS, API_URL_CAMERAS,
+    API_URL_DEVICES_INTERCOM, API_URL_DEVICES_BARRIER, API_URL_EVENTS, API_URL_CAMERAS,
     EVENT_TYPES, DEVICE_TYPE_INTERCOM, DEVICE_TYPE_GATE,
     DEFAULT_UPDATE_INTERVAL, TOKEN_REFRESH_BUFFER, CAMERAS_CACHE_TTL
 )
@@ -90,28 +90,52 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Unexpected error: {err}") from err
 
     async def _fetch_devices(self, headers):
-        """Fetch devices from API and update camera mapping."""
+        """Fetch intercoms and gates/barriers from API, merge, and update camera mapping."""
+        intercoms = await self._fetch_device_list(headers, API_URL_DEVICES_INTERCOM, DEVICE_TYPE_INTERCOM)
+
+        try:
+            barriers = await self._fetch_device_list(headers, API_URL_DEVICES_BARRIER, DEVICE_TYPE_GATE)
+        except ConfigEntryAuthFailed:
+            raise
+        except Exception as err:
+            # Ворота/шлагбаумы — не у всех аккаунтов, не роняем интеграцию из-за этого списка
+            _LOGGER.warning("Could not fetch gates/barriers, continuing with intercoms only: %s", err)
+            barriers = []
+
+        devices = intercoms + barriers
+
+        # Update mapping from camera_id to device_id and device_name
+        for device in devices:
+            camera_id = device.get("camera_id")
+            device_id = device.get("id")
+            if camera_id and device_id:
+                self.camera_to_device_id[camera_id] = str(device_id)
+                device_name = device.get("description") or device.get("name_by_user") or device.get("name_by_company") or f"Device {device_id}"
+                self.camera_to_device_name[camera_id] = device_name
+
+        return devices
+
+    async def _fetch_device_list(self, headers, url, device_type):
+        """Fetch a single device list (intercoms or gates/barriers).
+
+        device_type is force-applied to every returned item instead of trusting
+        the API's own field: пешеходные калитки, например, приходят с /intercom
+        как device_type=intercom, хотя это тоже вид ворот. Какой это тип
+        устройства, надёжнее определяется тем, какой endpoint мы вызвали,
+        а не значением из ответа.
+        """
         async with async_timeout.timeout(10):
             async with aiohttp.ClientSession() as session:
-                async with session.get(API_URL_DEVICES, headers=headers) as response:
+                async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
-                        _LOGGER.debug("Successfully fetched devices data")
-                        devices = self._parse_devices(data)
-                        # Update mapping from camera_id to device_id and device_name
-                        for device in devices:
-                            camera_id = device.get("camera_id")
-                            device_id = device.get("id")
-                            if camera_id and device_id:
-                                self.camera_to_device_id[camera_id] = str(device_id)
-                                device_name = device.get("description") or device.get("name_by_user") or device.get("name_by_company") or f"Device {device_id}"
-                                self.camera_to_device_name[camera_id] = device_name
-                        return devices
+                        _LOGGER.debug("Successfully fetched device list from %s", url)
+                        return self._parse_devices(data, device_type)
                     elif response.status == 401:
                         raise ConfigEntryAuthFailed("Invalid authentication")
                     else:
                         text = await response.text()
-                        _LOGGER.error("API error response: %s", text)
+                        _LOGGER.error("API error response from %s: %s - %s", url, response.status, text)
                         raise UpdateFailed(f"API error: {response.status}")
 
     async def _fetch_events(self, headers, devices):
@@ -175,8 +199,8 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Error fetching events: %s", err)
             return {}
 
-    def _parse_devices(self, data):
-        """Parse devices from API response."""
+    def _parse_devices(self, data, device_type):
+        """Parse devices from API response and tag them with device_type."""
         if not isinstance(data, dict):
             raise UpdateFailed(f"Expected dictionary response, got {type(data)}")
 
@@ -187,12 +211,14 @@ class HartkeyDataUpdateCoordinator(DataUpdateCoordinator):
             if "devices" in data_content and isinstance(data_content["devices"], list):
                 devices = data_content["devices"]
 
-        valid_devices = [
-            device for device in devices
-            if isinstance(device, dict) and device.get('device_type') in [DEVICE_TYPE_INTERCOM, DEVICE_TYPE_GATE]
-        ]
+        valid_devices = []
+        for device in devices:
+            if not isinstance(device, dict):
+                continue
+            device["device_type"] = device_type
+            valid_devices.append(device)
 
-        _LOGGER.info("Found %d valid devices (intercom/gate)", len(valid_devices))
+        _LOGGER.info("Found %d valid %s devices", len(valid_devices), device_type)
         return valid_devices
 
     def _parse_events(self, data):

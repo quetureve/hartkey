@@ -87,12 +87,13 @@ class HartkeyOpenButton(CoordinatorEntity, ButtonEntity):
             _LOGGER.error("Device ID is missing for device: %s", device)
             return
             
+        device_type = device.get('device_type', 'intercom')
+
         device_name = device.get('description')
         if not device_name:
-            device_name = device.get('name_by_user') or device.get('name_by_company') or f'Домофон {self.device_id}'
-        
-        device_type = device.get('device_type', 'intercom')
-        
+            fallback_label = "Ворота" if device_type == 'gate' else "Домофон"
+            device_name = device.get('name_by_user') or device.get('name_by_company') or f'{fallback_label} {self.device_id}'
+
         if device_type == 'gate':
             self._attr_icon = "mdi:gate"
             self._attr_name = f"{device_name} - Открыть ворота"
